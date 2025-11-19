@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Smile Segment Labeler v0.3 (Stateful/Gaps)</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; }
+    .container { display: flex; flex-direction: column; height: 100vh; }
+    .top { padding: 8px; border-bottom: 1px solid #ccc; }
+    .main { display: flex; flex: 1; overflow: hidden; }
+    .left, .right { padding: 8px; box-sizing: border-box; }
+    
+    .left { flex: 2; display: flex; flex-direction: column; }
+    .video-wrapper { 
+      flex: 1; 
+      display: flex; 
+      align-items: center; 
+      gap: 4px;
+      min-height: 300px; 
+      background: #f0f0f0;
+    }
+    video { 
+      max-width: 90%; 
+      max-height: 100%; 
+      background: #000; 
+    }
+    #plot { 
+      flex: 0 0 350px; 
+      min-height: 260px; 
+    }
+    
+    .right { flex: 1; border-left: 1px solid #ccc; font-size: 14px; overflow-y: auto; }
+    button { margin: 2px 2px; }
+    .segment-label { font-weight: bold; }
+    .status-labeled { color: green; }
+    .status-discarded { color: gray; }
+    .status-unlabeled { color: orange; }
+    .block { margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 8px;}
+    input[type="number"] { width: 80px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="top">
+    <div>
+      视频文件: <input type="file" id="videoFile" accept="video/*" />
+      CSV文件夹: <input type="file" id="csvDir" webkitdirectory multiple />
+      dat文件: <input type="file" id="datFile" accept=".dat,.txt" />
+      FPS: <input type="number" id="fpsInput" value="30" min="1" style="width:60px;" />
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="left">
+      <div class="video-wrapper">
+        <video id="video" controls></video>
+        <div style="display:flex;flex-direction:column;margin-left:4px;">
+          <button id="prevFrameBtn">上一帧</button>
+          <button id="nextFrameBtn">下一帧</button>
+          <button id="back6Btn">-6 帧</button>
+          <button id="forward6Btn">+6 帧</button>
+          <button id="back1sBtn">-1 秒</button>
+          <button id="forward1sBtn">+1 秒</button>
+          <button id="playSegmentBtn">播放当前区间</button>
+        </div>
+      </div>
+      <div>当前帧: <span id="currentFrame">-</span></div>
+      <div id="plot"></div>
+    </div>
+
+    <div class="right">
+      <div class="block">
+        <div>区间导航:</div>
+        <button id="prevSegBtn">上一段</button>
+        <button id="nextSegBtn">下一段</button>
+        <button id="nextUnlabeledBtn">下一未标注</button>
+      </div>
+
+      <div class="block">
+        <div>当前区间信息:</div>
+        <div>索引: <span id="segIndex">-</span> / <span id="segCount">0</span></div>
+        <div>
+          start_frame: <span id="segStart" style="display:none;">-</span> 
+          <input type="number" id="editStartFrame" style="width:70px;"/>
+        </div>
+        <div>
+          end_frame: <span id="segEnd" style="display:none;">-</span>
+          <input type="number" id="editEndFrame" style="width:70px;"/>
+        </div>
+        <button id="updateSegFramesBtn" style="width:150px;">应用帧调整</button>
+        <div>状态: <span id="segStatus" class="segment-label"></span></div>
+      </div>
+
+
+      <div class="block">
+        <div>标注当前区间:</div>
+        <button id="trueSmileBtn">真笑</button>
+        <button id="falseSmileBtn">假笑</button>
+        <button id="discardBtn">舍弃</button>
+      </div>
+
+      <div class="block">
+        <button id="exportBtn">导出标注 dat</button>
+        <button id="clearStateBtn" style="background-color: #fdd;">清除标注缓存</button>
+      </div>
+
+      <div class="block">
+        <div>说明：</div>
+        <ul>
+          <li>选择：视频 + CSV 文件夹 + 初始 dat。</li>
+          <li>图表自动缩放至 900 帧窗口, 红色虚线为 Long Gap。</li>
+          <li>点击曲线可跳到对应帧。</li>
+          <li>可用输入框微调区间的开始/结束帧。</li>
+          <li>标注进度会自动保存在浏览器缓存中。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const video = document.getElementById('video');
+  const videoFileInput = document.getElementById('videoFile');
+  const csvDirInput = document.getElementById('csvDir');
+  const datFileInput = document.getElementById('datFile');
+  const fpsInput = document.getElementById('fpsInput');
+
+  const currentFrameSpan = document.getElementById('currentFrame');
+  const plotDiv = document.getElementById('plot');
+
+  const prevFrameBtn = document.getElementById('prevFrameBtn');
+  const nextFrameBtn = document.getElementById('nextFrameBtn');
+  const back6Btn = document.getElementById('back6Btn');
+  const forward6Btn = document.getElementById('forward6Btn');
+  const back1sBtn = document.getElementById('back1sBtn');
+  const forward1sBtn = document.getElementById('forward1sBtn');
+  const playSegmentBtn = document.getElementById('playSegmentBtn');
+
+  const prevSegBtn = document.getElementById('prevSegBtn');
+  const nextSegBtn = document.getElementById('nextSegBtn');
+  const nextUnlabeledBtn = document.getElementById('nextUnlabeledBtn');
+
+  const segIndexSpan = document.getElementById('segIndex');
+  const segCountSpan = document.getElementById('segCount');
+  const segStartSpan = document.getElementById('segStart');
+  const segEndSpan = document.getElementById('segEnd');
+  const segStatusSpan = document.getElementById('segStatus');
+
+  const trueSmileBtn = document.getElementById('trueSmileBtn');
+  const falseSmileBtn = document.getElementById('falseSmileBtn');
+  const discardBtn = document.getElementById('discardBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  
+  const editStartFrame = document.getElementById('editStartFrame');
+  const editEndFrame = document.getElementById('editEndFrame');
+  const updateSegFramesBtn = document.getElementById('updateSegFramesBtn');
+  
+  // (新增 4: 获取新UI元素)
+  const clearStateBtn = document.getElementById('clearStateBtn');
+
+
+  let frames = [];   // frame index (global)
+  let ranks = [];    // rank_interpolated
+  let longGaps = []; // (新增 1: 存储 long gap 状态)
+  let segments = []; // {id, startFrame, endFrame, label}
+  let currentSegmentIndex = -1;
+
+  let verticalTraceIndex = null;
+  let minRank = 0;
+  let maxRank = 10;
+
+  let playingSegment = null;
+
+  function getFPS() {
+    const v = parseFloat(fpsInput.value) || 30;
+    return v;
+  }
+
+  function frameToTime(frame) {
+    return frame / getFPS();
+  }
+
+  function timeToFrame(time) {
+    return Math.round(time * getFPS());
+  }
+
+  // ---------- 文件加载 ----------
+
+  videoFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    video.src = url;
+  });
+
+  csvDirInput.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files).filter(f => f.name.endsWith('.csv'));
+    if (!files.length) {
+      alert('文件夹中没有找到 csv 文件');
+      return;
+    }
+    
+    // (修改 2: 不再依赖文件名排序，后续会按帧号排序)
+    // files.sort((a, b) => a.name.localeCompare(b.name)); 
+
+    Promise.all(files.map(readFileAsText)).then(texts => {
+      parseMultipleCSVs(texts);
+    }).catch(err => {
+      console.error(err);
+      alert('读取 CSV 文件夹时出错');
+    });
+  });
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+  }
+
+  // (修改 2: 重构CSV解析，解决排序和long_gap问题)
+  function parseMultipleCSVs(textArray) {
+    frames = [];
+    ranks = [];
+    longGaps = [];
+    let allData = []; // 临时存储 {frame, rank, isGap}
+    
+    for (const text of textArray) {
+      parseCSVAppend(text, allData); // 传入 allData 数组
+    }
+    if (!allData.length) return;
+
+    // (核心修复 2: 按帧号全局排序)
+    allData.sort((a, b) => a.frame - b.frame);
+    
+    // (核心修复 2: 过滤掉重复的帧号, 万一有)
+    const seenFrames = new Set();
+    const uniqueData = allData.filter(d => {
+        if (seenFrames.has(d.frame)) {
+            return false;
+        }
+        seenFrames.add(d.frame);
+        return true;
+    });
+
+    // 从排序后的数据中构建全局数组
+    frames = uniqueData.map(d => d.frame);
+    ranks = uniqueData.map(d => d.rank);
+    longGaps = uniqueData.map(d => d.isGap);
+    
+    // --- 修复结束 ---
+
+    minRank = Math.min(...ranks);
+    maxRank = Math.max(...ranks);
+
+    drawPlot();
+  }
+
+  // (修改 2: 不再 append 到全局, 而是 append 到 allData)
+  // (修改 1: 增加 is_long_gap 读取)
+  function parseCSVAppend(text, allData) {
+    const lines = text.split(/\r?\n/);
+    if (lines.length <= 1) return;
+    const header = lines[0].split(',');
+    const frameIdx = header.indexOf('frame');
+    const rankIdx = header.indexOf('rank_interpolated');
+    const isLongGapIdx = header.indexOf('is_long_gap'); // (新增 1)
+    
+    if (frameIdx === -1 || rankIdx === -1 || isLongGapIdx === -1) {
+       console.warn('CSV 缺少 frame, rank_interpolated 或 is_long_gap 列，已跳过');
+       return;
+    }
+    
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const cols = line.split(',');
+      const f = parseInt(cols[frameIdx], 10);
+      const r = parseFloat(cols[rankIdx]);
+      const isGap = cols[isLongGapIdx] ? cols[isLongGapIdx].toLowerCase() === 'true' : false; // (新增 1)
+      
+      if (!Number.isFinite(f) || !Number.isFinite(r)) continue;
+      
+      allData.push({ frame: f, rank: r, isGap: isGap }); // (修改 2)
+    }
+  }
+
+
+  datFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => parseDAT(reader.result);
+    reader.readAsText(file);
+  });
+
+  function parseDAT(text) {
+    segments = [];
+    const lines = text.split(/\r?\n/);
+    let id = 0;
+    for (const line of lines) {
+      const s = line.trim();
+      if (!s || s.startsWith('#')) continue;
+      const parts = s.includes(',') ? s.split(',') : s.split(/\s+/);
+      if (parts.length < 2) continue;
+      
+      const start = parseInt(parts[0], 10);
+      const end = parseInt(parts[1], 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      
+      segments.push({ id: id++, startFrame: start, endFrame: end, label: 'unlabeled' });
+    }
+    segCountSpan.textContent = segments.length.toString();
+    
+    // (新增 4: 尝试加载保存的状态)
+    const loaded = loadState();
+    
+    if (loaded) {
+      // 如果加载成功, 使用保存的索引
+      setCurrentSegment(currentSegmentIndex); 
+    } else if (segments.length > 0) {
+      // 否则, 从0开始
+      setCurrentSegment(0);
+    } else {
+      setCurrentSegment(-1);
+    }
+    
+    updatePlotSegments();
+  }
+
+  // ---------- Plotly 绘图 ----------
+
+  function drawPlot() {
+    if (frames.length === 0) return;
+
+    // (修改 1: 分离普通轨迹和Gap轨迹)
+    const smileTraceY = ranks.map((r, i) => longGaps[i] ? null : r);
+    const gapTraceY = ranks.map((r, i) => longGaps[i] ? r : null);
+
+    const smileTrace = {
+      x: frames,
+      y: smileTraceY,
+      mode: 'lines',
+      name: 'Smile Rank',
+      line: { color: 'blue' }
+    };
+    
+    const gapTrace = {
+      x: frames,
+      y: gapTraceY,
+      mode: 'lines',
+      name: 'Long Gap',
+      line: { color: 'red', dash: 'dash' }
+    };
+
+    const currentFrame = frames[0];
+    const verticalTrace = {
+      x: [currentFrame, currentFrame],
+      y: [minRank, maxRank],
+      mode: 'lines',
+      name: 'Current Frame',
+      line: { dash: 'dot', color: 'black' }
+    };
+    
+    verticalTraceIndex = 2; // (修改 1: V-line 现在是第3个轨迹)
+
+    const data = [smileTrace, gapTrace, verticalTrace]; // (修改 1: 添加gapTrace)
+
+    const layout = {
+      title: 'Smile Intensity',
+      xaxis: { title: 'Frame' },
+      yaxis: { title: 'Rank', autorange: 'reversed' },
+      margin: { t: 40, r: 10, b: 40, l: 40 }
+    };
+
+    Plotly.newPlot(plotDiv, data, layout);
+
+    plotDiv.on('plotly_click', (eventData) => {
+      if (!eventData || !eventData.points || !eventData.points.length) return;
+      const frame = Math.round(eventData.points[0].x);
+      seekToFrame(frame);
+      updatePlotWindow(frame); 
+    });
+
+    updatePlotSegments();
+    updatePlotWindow(currentFrame); 
+  }
+
+  function updateVerticalLine(frame) {
+    if (!frames.length || verticalTraceIndex === null) return;
+    const y0 = minRank;
+    const y1 = maxRank;
+    const update = { x: [[frame, frame]], y: [[y0, y1]] };
+    Plotly.restyle(plotDiv, update, [verticalTraceIndex]); // (修改 1: 确认索引)
+  }
+  
+  function updatePlotWindow(frame) {
+    if (!frames.length) return;
+    
+    const halfWindow = 450;
+    let xMin = frame - halfWindow;
+    let xMax = frame + halfWindow;
+    
+    const totalMinFrame = frames[0];
+    const totalMaxFrame = frames[frames.length - 1]; // (修复 3: 这里现在总是正确的)
+
+    if (xMin < totalMinFrame) {
+      xMin = totalMinFrame;
+      xMax = totalMinFrame + 900;
+    }
+    if (xMax > totalMaxFrame) {
+      xMax = totalMaxFrame;
+      xMin = totalMaxFrame - 900;
+      if (xMin < totalMinFrame) { 
+           xMin = totalMinFrame;
+      }
+    }
+    
+    Plotly.relayout(plotDiv, { 'xaxis.range': [xMin, xMax] });
+  }
+
+
+  function labelToColor(label) {
+    switch (label) {
+      case 'true_smile': return 'rgba(0,200,0,0.4)';
+      case 'false_smile': return 'rgba(200,0,0,0.4)';
+      case 'discarded': return 'rgba(128,128,128,0.4)';
+      case 'unlabeled':
+      default: return 'rgba(255,165,0,0.4)';
+    }
+  }
+
+  function updatePlotSegments() {
+    if (!frames.length) return;
+    const shapes = [];
+    for (const seg of segments) {
+      const color = labelToColor(seg.label);
+      shapes.push({
+        type: 'rect',
+        xref: 'x',
+        yref: 'paper',
+        x0: seg.startFrame,
+        x1: seg.endFrame,
+        y0: 0,
+        y1: 1,
+        fillcolor: color,
+        opacity: seg.label === 'discarded' ? 0.1 : 0.2,
+        line: { width: 0 }
+      });
+    }
+    Plotly.relayout(plotDiv, { shapes });
+  }
+
+  // ---------- 视频 ↔ 帧同步 ----------
+
+  video.addEventListener('timeupdate', () => {
+    const frame = timeToFrame(video.currentTime);
+    currentFrameSpan.textContent = frame.toString();
+    updateVerticalLine(frame); 
+  });
+
+  function seekToFrame(frame) {
+    if (!Number.isFinite(frame)) return;
+    if (frame < 0) frame = 0;
+    video.currentTime = frameToTime(frame);
+  }
+
+  prevFrameBtn.addEventListener('click', () => {
+    const frame = timeToFrame(video.currentTime) - 1;
+    seekToFrame(frame);
+  });
+  nextFrameBtn.addEventListener('click', () => {
+    const frame = timeToFrame(video.currentTime) + 1;
+    seekToFrame(frame);
+  });
+  back6Btn.addEventListener('click', () => {
+    const frame = timeToFrame(video.currentTime) - 6;
+    seekToFrame(frame);
+  });
+  forward6Btn.addEventListener('click', () => {
+    const frame = timeToFrame(video.currentTime) + 6;
+    seekToFrame(frame);
+  });
+  back1sBtn.addEventListener('click', () => {
+    const t = video.currentTime - 1.0;
+    video.currentTime = Math.max(t, 0);
+  });
+  forward1sBtn.addEventListener('click', () => {
+    video.currentTime = video.currentTime + 1.0;
+  });
+
+  playSegmentBtn.addEventListener('click', () => {
+    if (currentSegmentIndex < 0 || currentSegmentIndex >= segments.length) return;
+    const seg = segments[currentSegmentIndex];
+    playingSegment = seg.id;
+    seekToFrame(seg.startFrame);
+    video.play();
+  });
+
+  // (这个 timeupdate 监听器必须在 seekToFrame 之后定义, 或者分开)
+  // (我们把它和上面的合并, 不, 保持独立, 因为它有 'playingSegment' 逻辑)
+  video.addEventListener('timeupdate', () => {
+    if (playingSegment === null) return;
+    const seg = segments.find(s => s.id === playingSegment);
+    if (!seg) { playingSegment = null; return; }
+    const frame = timeToFrame(video.currentTime);
+    if (frame >= seg.endFrame) {
+      video.pause();
+      playingSegment = null;
+      seekToFrame(seg.endFrame);
+    }
+  });
+
+  // ---------- 区间导航与标注 ----------
+
+  function labelToStatusClass(label) {
+    switch (label) {
+      case 'true_smile': return 'status-labeled';
+      case 'false_smile': return 'status-labeled';
+      case 'discarded': return 'status-discarded';
+      case 'unlabeled':
+      default: return 'status-unlabeled';
+    }
+  }
+
+  function setCurrentSegment(idx) {
+    currentSegmentIndex = idx;
+    if (idx < 0 || idx >= segments.length) {
+      segIndexSpan.textContent = '-';
+      segStartSpan.textContent = '-';
+      segEndSpan.textContent = '-';
+      segStatusSpan.textContent = '';
+      segStatusSpan.className = 'segment-label';
+      editStartFrame.value = ''; 
+      editEndFrame.value = ''; 
+      return;
+    }
+    const seg = segments[idx];
+    segIndexSpan.textContent = (idx + 1).toString();
+    segStartSpan.textContent = seg.startFrame.toString();
+    segEndSpan.textContent = seg.endFrame.toString();
+    segStatusSpan.textContent = seg.label;
+    segStatusSpan.className = 'segment-label ' + labelToStatusClass(seg.label);
+    
+    editStartFrame.value = seg.startFrame.toString(); 
+    editEndFrame.value = seg.endFrame.toString(); 
+    
+    seekToFrame(seg.startFrame);
+    updatePlotWindow(seg.startFrame); 
+    
+    saveState(); // (新增 4: 切换区间时保存索引)
+  }
+
+  prevSegBtn.addEventListener('click', () => {
+    if (!segments.length) return;
+    const idx = currentSegmentIndex <= 0 ? 0 : currentSegmentIndex - 1;
+    setCurrentSegment(idx);
+  });
+
+  nextSegBtn.addEventListener('click', () => {
+    if (!segments.length) return;
+    const idx = currentSegmentIndex >= segments.length - 1 ? segments.length - 1 : currentSegmentIndex + 1;
+    setCurrentSegment(idx);
+  });
+
+  nextUnlabeledBtn.addEventListener('click', () => {
+    if (!segments.length) return;
+    let start = currentSegmentIndex + 1;
+    if (start < 0) start = 0;
+    for (let i = start; i < segments.length; i++) {
+      if (segments[i].label === 'unlabeled') {
+        setCurrentSegment(i);
+        return;
+      }
+    }
+    alert('没有未标注的区间了');
+  });
+
+  function setLabel(label) {
+    if (currentSegmentIndex < 0 || currentSegmentIndex >= segments.length) return;
+    segments[currentSegmentIndex].label = label;
+    setCurrentSegment(currentSegmentIndex); // 刷新UI
+    updatePlotSegments(); // 刷新图表
+    saveState(); // (新增 4: 标注时保存状态)
+  }
+
+  trueSmileBtn.addEventListener('click', () => setLabel('true_smile'));
+  falseSmileBtn.addEventListener('click', () => setLabel('false_smile'));
+  discardBtn.addEventListener('click', () => setLabel('discarded'));
+  
+  updateSegFramesBtn.addEventListener('click', () => {
+    if (currentSegmentIndex < 0 || currentSegmentIndex >= segments.length) return;
+    
+    const newStart = parseInt(editStartFrame.value, 10);
+    const newEnd = parseInt(editEndFrame.value, 10);
+
+    if (!Number.isFinite(newStart) || !Number.isFinite(newEnd)) {
+      alert('请输入有效的帧号');
+      return;
+    }
+    if (newStart >= newEnd) {
+      alert('开始帧必须小于结束帧');
+      return;
+    }
+    if (newStart < 0) {
+       alert('开始帧不能为负数');
+       return;
+    }
+
+    const seg = segments[currentSegmentIndex];
+    seg.startFrame = newStart;
+    seg.endFrame = newEnd;
+
+    setCurrentSegment(currentSegmentIndex); 
+    updatePlotSegments(); 
+    saveState(); // (新增 4: 调整帧时保存状态)
+  });
+
+
+  // ---------- (新增 4: 状态保存与加载) ----------
+  
+  const STATE_KEY = 'smileLabelerSegments';
+  const INDEX_KEY = 'smileLabelerCurrentIndex';
+
+  function saveState() {
+    if (segments.length > 0) {
+      localStorage.setItem(STATE_KEY, JSON.stringify(segments));
+    }
+    localStorage.setItem(INDEX_KEY, currentSegmentIndex.toString());
+  }
+
+  function loadState() {
+    const savedSegments = localStorage.getItem(STATE_KEY);
+    const savedIndex = localStorage.getItem(INDEX_KEY);
+    
+    let stateLoaded = false;
+    if (savedSegments && segments.length > 0) {
+      try {
+        const parsedSegments = JSON.parse(savedSegments);
+        // 关键检查: 只有当 .dat 加载的区间数和缓存中的区间数一致
+        // 并且第一个和最后一个区间的 startFrame 一致时, 才认为是同一个任务
+        if (parsedSegments.length === segments.length &&
+            segments[0].startFrame === parsedSegments[0].startFrame &&
+            segments[segments.length-1].startFrame === parsedSegments[parsedSegments.length-1].startFrame) {
+          
+          console.log('Loading saved labels...');
+          // 恢复缓存中的 label 和 (可能被修改过的) 帧
+          segments = parsedSegments; 
+          stateLoaded = true;
+        } else {
+          console.warn('Saved segments do not match loaded .dat file. Discarding saved state.');
+          localStorage.removeItem(STATE_KEY);
+          localStorage.removeItem(INDEX_KEY);
+        }
+      } catch (e) {
+        console.error('Failed to parse saved state.', e);
+        localStorage.removeItem(STATE_KEY);
+        localStorage.removeItem(INDEX_KEY);
+      }
+    }
+    
+    // 加载索引
+    if (savedIndex) {
+      currentSegmentIndex = parseInt(savedIndex, 10) || 0;
+      if (currentSegmentIndex >= segments.length) currentSegmentIndex = 0;
+    }
+    
+    return stateLoaded; // 返回是否成功加载了 segments
+  }
+  
+  clearStateBtn.addEventListener('click', () => {
+    if (confirm('确定要清除所有已保存的（true/false/discarded）标注缓存吗？\n下次加载 .dat 文件时将全部重置为 "unlabeled"。')) {
+      localStorage.removeItem(STATE_KEY);
+      localStorage.removeItem(INDEX_KEY);
+      alert('缓存已清除。请重新加载 .dat 文件（如果已加载）。');
+      // 可以选择刷新页面
+      // location.reload(); 
+    }
+  });
+
+
+  // ---------- 导出 dat ----------
+
+  exportBtn.addEventListener('click', () => {
+    if (!segments.length) {
+      alert('没有区间可导出');
+      return;
+    }
+    let lines = [];
+    lines.push('# start_frame end_frame label');
+    for (const seg of segments) {
+      if (seg.label === 'true_smile' || seg.label === 'false_smile') {
+        lines.push(`${seg.startFrame} ${seg.endFrame} ${seg.label}`);
+      }
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'smile_segments_labeled.dat';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+})();
+</script>
+</body>
+</html>

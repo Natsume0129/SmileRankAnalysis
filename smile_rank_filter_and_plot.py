@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -46,16 +45,21 @@ OUT_DIR = SCRIPT_DIR / "output"
 PLOT_DIR = OUT_DIR / "plots"
 DATA_DIR = OUT_DIR / "data"
 
+# --- (修改点) ---
 # Smoothing options
-SMOOTH_METHOD: Literal["savgol", "gaussian", "moving_average"] = "savgol"
+# 1. (修改) 将默认方法从 "savgol" 改为 "gaussian"
+SMOOTH_METHOD: Literal["savgol", "gaussian", "moving_average"] = "gaussian"
 # Savitzky–Golay parameters
-SAVGOL_WINDOW = 9     # must be odd and >= polyorder+2
+SAVGOL_WINDOW = 9     # (高斯模式下不使用)
 SAVGOL_POLY = 2
-# Gaussian parameters
+# Gaussian parameters (高斯参数)
+# 2. (确认) GAUSS_SIGMA (s1.0)
 GAUSS_SIGMA = 1.0
+# 3. (确认) GAUSS_KERNEL_RADIUS (r3)
 GAUSS_KERNEL_RADIUS = 3  # kernel size = 2*radius+1
 # Moving average parameters
 MA_WINDOW = 5
+# --- (修改结束) ---
 
 
 # ------------------------- Utils -------------------------
@@ -208,6 +212,9 @@ def main():
 
     # Choose base series for smoothing
     base = all_df["rank_interpolated"].to_numpy()
+    
+    print(f"[INFO] Applying filter: {SMOOTH_METHOD} (r={GAUSS_KERNEL_RADIUS}, s={GAUSS_SIGMA})")
+    
     smoothed = smooth_series(
         base,
         method=SMOOTH_METHOD,
