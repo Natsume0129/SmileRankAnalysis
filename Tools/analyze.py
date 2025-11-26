@@ -1,35 +1,49 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-analyze.py  (version: no-name-matching)
+analyze.py (pooled, multi-day)
 
-Analyze smile segments using explicitly provided segment files and smile-rank files.
+- 输入：segments_dir（.dat 标注文件目录），smilerank_dir（smile rank CSV 目录）
+- 自动根据文件名中的 8 位日期进行一一匹配，例如：
+    segments:      output20250926.dat
+    smilerank:     smile_data_merged_20250926.csv
+- 输出：跨所有日期 pooled 的统计，只按 label 区分，不看日期。
 
-=== INPUT ===
-You provide:
-    --segments    seg_file1 seg_file2 seg_file3 ...
-    --smileranks  rank_file1 rank_file2 rank_file3 ...
-These lists are positionally matched:
-    segments[i]  <->  smileranks[i]
-
-=== OUTPUT ===
-    - segments_analysis.csv
-    - label_summary.csv
-    - duration_by_label.png
-    - mean_rank_by_label.png
-    - peak_pos_by_label.png
+每个区间计算：
+- duration_frames
+- mean_rank
+- peak_rank (强度最强处)
+- peak_frame
+- peak_pos_frac (峰值在区间内的位置 0~1)
+- std_rank
+- dynamic_range
+- peak_position_category (early/middle/late)
+- variation_category (flat/dynamic)
 """
 
 import argparse
+import re
 from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 
+def extract_date_from_name(name: str) -> Optional[str]:
+    """从文件名中提取 8 位日期（例如 20250926）。"""
+    m = re.search(r"(\d{8})", name)
+    return m.group(1) if m else None
+
+
 def parse_segments_file(path: Path) -> pd.DataFrame:
+    """解析 .dat 片段文件：
+    # start_frame end_frame label remark
+    155 299 false_smile ...
+    """
     rows = []
-    with open(path, encoding="utf-8") as f:
+    with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -42,10 +56,11 @@ def parse_segments_file(path: Path) -> pd.DataFrame:
             label = parts[2]
             remark = parts[3] if len(parts) == 4 else ""
             rows.append((start, end, label, remark))
+
     return pd.DataFrame(rows, columns=["start_frame", "end_frame", "label", "remark"])
 
 
-def load_smilerank_file(path: Path, frame_col: str, rank_col: str):
+def load_smilerank_file(path: Path, frame_col: str, rank_col: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     if frame_col not in df.columns:
         raise ValueError(f"{path} missing frame column '{frame_col}'")
@@ -58,14 +73,14 @@ def load_smilerank_file(path: Path, frame_col: str, rank_col: str):
 
 
 def analyze_segment(
-    seg_row,
-    sr_df,
+    seg_row: pd.Series,
+    sr_df: pd.DataFrame,
     frame_col: str,
     rank_col: str,
     lower_is_stronger: bool,
-):
-    start = seg_row["start_frame"]
-    end = seg_row["end_frame"]
+) -> dict:
+    start = int(seg_row["start_frame"])
+    end = int(seg_row["end_frame"])
     label = seg_row["label"]
     remark = seg_row["remark"]
 
@@ -98,7 +113,7 @@ def analyze_segment(
     std_rank = float(np.std(ranks))
     dynamic_range = float(np.max(ranks) - np.min(ranks))
 
-    # Peak = strongest
+    # 峰值 = 笑容最强的位置
     if lower_is_stronger:
         peak_idx = int(np.argmin(ranks))
     else:
@@ -113,16 +128,17 @@ def analyze_segment(
     else:
         peak_pos_frac = np.nan
 
-    # Basic curve categories
+    # 峰值位置类别
     if np.isnan(peak_pos_frac):
         peak_pos_category = "missing"
-    elif peak_pos_frac < 1 / 3:
+    elif peak_pos_frac < 1.0 / 3:
         peak_pos_category = "early"
-    elif peak_pos_frac > 2 / 3:
+    elif peak_pos_frac > 2.0 / 3:
         peak_pos_category = "late"
     else:
         peak_pos_category = "middle"
 
+    # 变化程度
     variation_category = "flat" if dynamic_range < 0.5 else "dynamic"
 
     return {
@@ -142,62 +158,154 @@ def analyze_segment(
     }
 
 
-def make_plots(df: pd.DataFrame, outdir: Path):
+def make_plots(df: pd.DataFrame, outdir: Path, invert_rank_axis: bool) -> None:
+    outdir.mkdir(parents=True, exist_ok=True)
 
-    def boxplot(metric, filename, ylabel):
-        d = []
+    def boxplot(metric: str, filename: str, ylabel: str, invert: bool = False):
+        data = []
         labels = []
         for lbl, g in df.groupby("label"):
-            val = g[metric].dropna().to_numpy()
-            if len(val) == 0:
+            vals = g[metric].dropna().to_numpy()
+            if len(vals) == 0:
                 continue
             labels.append(lbl)
-            d.append(val)
+            data.append(vals)
 
-        if not d:
+        if not data:
             return
 
         plt.figure()
-        plt.boxplot(d, labels=labels, showmeans=True)
+        # 注意：Matplotlib 3.9 起推荐 tick_labels
+        plt.boxplot(data, labels=labels, showmeans=True)
         plt.ylabel(ylabel)
         plt.title(f"{ylabel} by label")
-        plt.gca().invert_yaxis()
+        if invert:
+            plt.gca().invert_yaxis()
         plt.tight_layout()
         plt.savefig(outdir / filename)
         plt.close()
 
-    boxplot("duration_frames", "duration_by_label.png", "Duration (frames)")
-    boxplot("mean_rank", "mean_rank_by_label.png", "Mean Smile Rank")
-    boxplot("peak_pos_frac", "peak_pos_by_label.png", "Peak Position Fraction")
+    # 时长：不反转
+    boxplot(
+        "duration_frames",
+        "duration_by_label.png",
+        "Duration (frames)",
+        invert=False,
+    )
+    # 平均强度：越小越强 → 如果 lower_is_stronger，则反转纵轴
+    boxplot(
+        "mean_rank",
+        "mean_rank_by_label.png",
+        "Mean smile rank (lower = stronger)",
+        invert=invert_rank_axis,
+    )
+    # 峰值位置 0~1：不反转
+    boxplot(
+        "peak_pos_frac",
+        "peak_pos_by_label.png",
+        "Peak position inside segment (0=start, 1=end)",
+        invert=False,
+    )
+
+
+def summarize_by_label(df: pd.DataFrame) -> pd.DataFrame:
+    metrics = [
+        "duration_frames",
+        "mean_rank",
+        "peak_rank",
+        "peak_pos_frac",
+        "std_rank",
+        "dynamic_range",
+    ]
+    agg = {}
+    for m in metrics:
+        agg[f"{m}_mean"] = (m, "mean")
+        agg[f"{m}_std"] = (m, "std")
+        agg[f"{m}_count"] = (m, "count")
+
+    summary = df.groupby("label").agg(**agg).reset_index()
+    return summary
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--segments", nargs="+", required=True,
-                        help="List of segment .dat files (in order).")
-    parser.add_argument("--smileranks", nargs="+", required=True,
-                        help="List of smile-rank CSV files (in order).")
-    parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--frame-col", dest="frame_col", default="frame")
-    parser.add_argument("--rank-col", dest="rank_col", default="rank_smoothed")
-    parser.add_argument("--lower-is-stronger", action="store_true")
+    parser = argparse.ArgumentParser(description="Pooled smile segment analysis.")
+    parser.add_argument(
+        "--segments-dir",
+        type=str,
+        required=True,
+        help="Directory containing segment .dat files (e.g., output20250926.dat).",
+    )
+    parser.add_argument(
+        "--smilerank-dir",
+        type=str,
+        required=True,
+        help="Directory containing smile-rank CSV files (e.g., smile_data_merged_20250926.csv).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        help="Directory to write pooled analysis outputs.",
+    )
+    parser.add_argument(
+        "--frame-col",
+        type=str,
+        default="frame",
+        help="Frame index column name in smilerank CSV.",
+    )
+    parser.add_argument(
+        "--rank-col",
+        type=str,
+        default="rank_interpolated",
+        help="Smile rank column name in smilerank CSV.",
+    )
+    parser.add_argument(
+        "--lower-is-stronger",
+        action="store_true",
+        help="If set, smaller rank value means stronger smile.",
+    )
 
     args = parser.parse_args()
 
-    if len(args.segments) != len(args.smileranks):
-        raise ValueError("segments and smileranks must have same length.")
-
+    segments_dir = Path(args.segments_dir)
+    smilerank_dir = Path(args.smilerank_dir)
     outdir = Path(args.output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
 
+    # 构建 smilerank 映射：date -> path
+    smilerank_map = {}
+    for p in smilerank_dir.iterdir():
+        if not p.is_file():
+            continue
+        if p.suffix.lower() != ".csv":
+            continue
+        date_str = extract_date_from_name(p.name)
+        if date_str:
+            smilerank_map[date_str] = p
+
     all_results = []
 
-    for seg_path_str, sr_path_str in zip(args.segments, args.smileranks):
-        seg_path = Path(seg_path_str)
-        sr_path = Path(sr_path_str)
+    # 遍历 segments 目录，按日期匹配
+    for seg_path in sorted(segments_dir.iterdir()):
+        if not seg_path.is_file():
+            continue
+        if seg_path.suffix.lower() not in (".dat", ".txt"):
+            continue
 
-        print(f"[INFO] Processing pair:")
-        print(f"       segments = {seg_path}")
+        date_str = extract_date_from_name(seg_path.name)
+        if not date_str:
+            print(f"[WARN] Cannot extract date from segments file: {seg_path.name}")
+            continue
+
+        if date_str not in smilerank_map:
+            print(
+                f"[WARN] No smilerank CSV found for date {date_str} (segments: {seg_path.name})"
+            )
+            continue
+
+        sr_path = smilerank_map[date_str]
+        print(f"[INFO] Processing date {date_str}:")
+        print(f"       segments  = {seg_path}")
         print(f"       smilerank = {sr_path}")
 
         seg_df = parse_segments_file(seg_path)
@@ -209,29 +317,30 @@ def main():
                 sr_df,
                 args.frame_col,
                 args.rank_col,
-                args.lower_is_stronger
+                args.lower_is_stronger,
             )
+            res["session_date"] = date_str
             res["segment_file"] = seg_path.name
             res["smilerank_file"] = sr_path.name
             res["segment_index"] = idx
-
             all_results.append(res)
 
-    df = pd.DataFrame(all_results)
-    df.to_csv(outdir / "segments_analysis.csv", index=False, encoding="utf-8-sig")
+    if not all_results:
+        print("[ERROR] No segments analyzed. Check your directories and naming.")
+        return
 
-    # Summary by label
-    summary = df.groupby("label").agg({
-        "duration_frames": "mean",
-        "mean_rank": "mean",
-        "peak_rank": "mean",
-        "peak_pos_frac": "mean",
-    }).reset_index()
-    summary.to_csv(outdir / "label_summary.csv", index=False, encoding="utf-8-sig")
+    segments_df = pd.DataFrame(all_results)
+    segments_csv = outdir / "segments_analysis.csv"
+    segments_df.to_csv(segments_csv, index=False, encoding="utf-8-sig")
+    print(f"[INFO] Saved pooled per-segment analysis to: {segments_csv}")
 
-    make_plots(df, outdir)
+    summary_df = summarize_by_label(segments_df)
+    summary_csv = outdir / "label_summary.csv"
+    summary_df.to_csv(summary_csv, index=False, encoding="utf-8-sig")
+    print(f"[INFO] Saved pooled label summary to: {summary_csv}")
 
-    print(f"[INFO] All outputs saved under {outdir}")
+    make_plots(segments_df, outdir, invert_rank_axis=args.lower_is_stronger)
+    print(f"[INFO] Plots saved in: {outdir}")
 
 
 if __name__ == "__main__":

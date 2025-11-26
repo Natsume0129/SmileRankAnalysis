@@ -15,16 +15,16 @@ from typing import List, Tuple
 
 # ================== 可修改区域 ==================
 # 输入 CSV 所在目录
-INPUT_DIR = r"E:\Matsuda_标注\20250926\csv_data"
+INPUT_DIR = r"D:\Annotation-input-data\20251029\20251029\csv_data"
 
 # 输出 CSV 目录
-OUTPUT_DIR = r"./output"
+OUTPUT_DIR = r"D:\Annotation-input-data\20251029"
 
 # 输入文件的前缀（例如：smile_data_segment_0.csv）
 FILENAME_PREFIX = "smile_data_segment_"
 
 # 输出文件名
-OUTPUT_FILENAME = "smile_data_merged_20250926.csv"
+OUTPUT_FILENAME = "smile_data_merged_20251029.csv"
 
 # 是否认为每个小 CSV 都带有相同的表头
 HAS_HEADER = True
