@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Smile Segment Labeler v0.4 (English)</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+    .container { display: flex; flex-direction: column; height: 100vh; }
+    .top { padding: 8px; border-bottom: 1px solid #ccc; background: #f9f9f9; }
+    .main { display: flex; flex: 1; overflow: hidden; }
+    
+    /* Left Layout */
+    .left { flex: 2; display: flex; flex-direction: column; border-right: 1px solid #ddd; }
+    .video-wrapper { 
+      flex: 1; 
+      display: flex; 
+      flex-direction: column; 
+      background: #000;
+      min-height: 300px;
+      position: relative;
+    }
+    .video-container {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      width: 100%;
+    }
+    video { 
+      max-width: 100%; 
+      max-height: 100%; 
+    }
+    .video-controls {
+      background: #eee;
+      padding: 5px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      align-items: center;
+      border-top: 1px solid #ccc;
+    }
+    #plot { 
+      flex: 0 0 350px; 
+      min-height: 260px; 
+      border-top: 1px solid #ccc;
+    }
+    
+    /* Right Layout */
+    .right { flex: 1; padding: 10px; overflow-y: auto; background: #fcfcfc; }
+    
+    /* Common Controls */
+    button { 
+      padding: 4px 8px; 
+      cursor: pointer; 
+      font-size: 13px; 
+      border: 1px solid #ccc; 
+      background: #fff; 
+      border-radius: 3px;
+    }
+    button:hover { background: #e0e0e0; }
+    button:active { background: #ccc; }
+    
+    input[type="number"] { width: 60px; padding: 2px; }
+    input[type="text"] { width: 95%; padding: 4px; margin-top: 4px; box-sizing: border-box;}
+    
+    .block { margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 12px;}
+    .block-title { font-weight: bold; margin-bottom: 6px; color: #333; }
+    
+    /* Status Colors */
+    .segment-label { font-weight: bold; margin-left: 5px; }
+    .status-labeled { color: green; }
+    .status-mixed { color: #d4ac0d; /* Dark Yellow */ }
+    .status-discarded { color: gray; }
+    .status-unlabeled { color: orange; }
+    
+    /* Special Buttons */
+    .btn-set { background-color: #e6f7ff; border-color: #1890ff; color: #0050b3; }
+    .btn-true { background-color: #f6ffed; border-color: #b7eb8f; color: #389e0d; }
+    .btn-mixed { background-color: #fffbe6; border-color: #ffe58f; color: #d48806; }
+    .btn-false { background-color: #fff1f0; border-color: #ffa39e; color: #cf1322; }
+    .btn-discard { background-color: #f5f5f5; color: #666; }
+    .btn-new { background-color: #e6fffb; border-color: #87e8de; color: #006d75; font-weight: bold;}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="top">
+    <div>
+      <strong>Input:</strong>
+      Video: <input type="file" id="videoFile" accept="video/*" />
+      CSV Folder: <input type="file" id="csvDir" webkitdirectory multiple />
+      DAT File: <input type="file" id="datFile" accept=".dat,.txt" />
+      FPS: <input type="number" id="fpsInput" value="30" min="1" />
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="left">
+      <div class="video-wrapper">
+        <div class="video-container">
+          <video id="video" controls></video>
+        </div>
+        <div class="video-controls">
+          <span>Speed:</span>
+          <button id="speed05Btn">0.5x</button>
+          <button id="speed10Btn" style="font-weight:bold;">1.0x</button>
+          <div style="width: 1px; height: 20px; background: #ccc; margin: 0 5px;"></div>
+          
+          <button id="prevFrameBtn">&lt; Frame</button>
+          <button id="nextFrameBtn">Frame &gt;</button>
+          <button id="back6Btn">-6</button>
+          <button id="forward6Btn">+6</button>
+          <button id="back1sBtn">-1s</button>
+          <button id="forward1sBtn">+1s</button>
+          <div style="width: 1px; height: 20px; background: #ccc; margin: 0 5px;"></div>
+          <button id="playSegmentBtn">Play Segment</button>
+          <span style="margin-left:auto;">Frame: <strong id="currentFrame">-</strong></span>
+        </div>
+      </div>
+      <div id="plot"></div>
+    </div>
+
+    <div class="right">
+      <div class="block">
+        <div class="block-title">Navigation & Creation</div>
+        <button id="prevSegBtn">Prev Seg</button>
+        <button id="nextSegBtn">Next Seg</button>
+        <button id="nextUnlabeledBtn">Next Unlabeled</button>
+        <button id="newSegBtn" class="btn-new" title="Create 60-frame segment at current position">+ New Seg</button>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Current Segment Info</div>
+        <div style="margin-bottom:4px;">
+          Index: <span id="segIndex">-</span> / <span id="segCount">0</span>
+          Status: <span id="segStatus" class="segment-label"></span>
+        </div>
+        
+        <div style="display:flex; align-items:center; margin-bottom:4px;">
+          <label style="width:40px;">Start:</label>
+          <input type="number" id="editStartFrame" />
+          <button id="setStartBtn" class="btn-set" title="Set current video frame as Start">📍Set</button>
+        </div>
+        <div style="display:flex; align-items:center; margin-bottom:4px;">
+          <label style="width:40px;">End:</label>
+          <input type="number" id="editEndFrame" />
+          <button id="setEndBtn" class="btn-set" title="Set current video frame as End">📍Set</button>
+        </div>
+        
+        <button id="updateSegFramesBtn" style="width:100%; margin-top:4px;">Apply Frame Changes</button>
+        
+        <div style="margin-top:8px;">
+          <label>Remark:</label>
+          <input type="text" id="remarkInput" placeholder="Add remark here..." />
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Labeling</div>
+        <button id="trueSmileBtn" class="btn-true">True Smile</button>
+        <button id="mixedSmileBtn" class="btn-mixed">Mixed Smile</button>
+        <button id="falseSmileBtn" class="btn-false">False Smile</button>
+        <button id="discardBtn" class="btn-discard">Discard</button>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Export & Cache</div>
+        <button id="exportBtn">Export DAT (w/ Remarks)</button>
+        <button id="clearStateBtn" style="color:red; margin-top:4px;">Clear Cache</button>
+      </div>
+
+      <div class="block">
+        <div class="block-title">Instructions</div>
+        <ul style="padding-left: 20px; margin: 0; color: #555;">
+          <li><strong>Speed:</strong> Toggle 0.5x/1.0x below video.</li>
+          <li><strong>New Seg:</strong> Creates a 60-frame segment at current time.</li>
+          <li><strong>Edit:</strong> Use "📍Set" to snap boundaries to current frame.</li>
+          <li><strong>Label:</strong> Added "Mixed Smile" (Yellow).</li>
+          <li><strong>Remark:</strong> Auto-saved. Included in export.</li>
+          <li><strong>Y-Axis:</strong> Locked to 0-10 range.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // --- UI Elements ---
+  const video = document.getElementById('video');
+  const videoFileInput = document.getElementById('videoFile');
+  const csvDirInput = document.getElementById('csvDir');
+  const datFileInput = document.getElementById('datFile');
+  const fpsInput = document.getElementById('fpsInput');
+
+  const currentFrameSpan = document.getElementById('currentFrame');
+  const plotDiv = document.getElementById('plot');
+
+  // Video Controls
+  const speed05Btn = document.getElementById('speed05Btn');
+  const speed10Btn = document.getElementById('speed10Btn');
+  const prevFrameBtn = document.getElementById('prevFrameBtn');
+  const nextFrameBtn = document.getElementById('nextFrameBtn');
+  const back6Btn = document.getElementById('back6Btn');
+  const forward6Btn = document.getElementById('forward6Btn');
+  const back1sBtn = document.getElementById('back1sBtn');
+  const forward1sBtn = document.getElementById('forward1sBtn');
+  const playSegmentBtn = document.getElementById('playSegmentBtn');
+
+  // Navigation & Edit
+  const prevSegBtn = document.getElementById('prevSegBtn');
+  const nextSegBtn = document.getElementById('nextSegBtn');
+  const nextUnlabeledBtn = document.getElementById('nextUnlabeledBtn');
+  const newSegBtn = document.getElementById('newSegBtn'); 
+
+  const segIndexSpan = document.getElementById('segIndex');
+  const segCountSpan = document.getElementById('segCount');
+  const segStatusSpan = document.getElementById('segStatus');
+  
+  const editStartFrame = document.getElementById('editStartFrame');
+  const editEndFrame = document.getElementById('editEndFrame');
+  const setStartBtn = document.getElementById('setStartBtn'); 
+  const setEndBtn = document.getElementById('setEndBtn');     
+  const updateSegFramesBtn = document.getElementById('updateSegFramesBtn');
+  const remarkInput = document.getElementById('remarkInput'); 
+
+  // Labeling
+  const trueSmileBtn = document.getElementById('trueSmileBtn');
+  const mixedSmileBtn = document.getElementById('mixedSmileBtn'); 
+  const falseSmileBtn = document.getElementById('falseSmileBtn');
+  const discardBtn = document.getElementById('discardBtn');
+
+  // System
+  const exportBtn = document.getElementById('exportBtn');
+  const clearStateBtn = document.getElementById('clearStateBtn');
+
+  // --- State Variables ---
+  let frames = [];   
+  let ranks = [];    
+  let longGaps = []; 
+  // Segment structure: { id, startFrame, endFrame, label, remark }
+  let segments = []; 
+  let currentSegmentIndex = -1;
+
+  let verticalTraceIndex = null;
+  let minRank = 0;
+  let maxRank = 10;
+  let playingSegment = null;
+
+  // --- Helpers ---
+  function getFPS() { return parseFloat(fpsInput.value) || 30; }
+  function frameToTime(f) { return f / getFPS(); }
+  function timeToFrame(t) { return Math.round(t * getFPS()); }
+
+  // --- 1. Video Speed Control ---
+  speed05Btn.addEventListener('click', () => {
+    video.playbackRate = 0.5;
+    speed05Btn.style.fontWeight = 'bold';
+    speed10Btn.style.fontWeight = 'normal';
+  });
+  speed10Btn.addEventListener('click', () => {
+    video.playbackRate = 1.0;
+    speed05Btn.style.fontWeight = 'normal';
+    speed10Btn.style.fontWeight = 'bold';
+  });
+
+  // --- 2. File Loading ---
+  videoFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) video.src = URL.createObjectURL(file);
+  });
+
+  csvDirInput.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files).filter(f => f.name.endsWith('.csv'));
+    if (!files.length) { alert('No CSV files found'); return; }
+    Promise.all(files.map(readFileAsText)).then(parseMultipleCSVs).catch(console.error);
+  });
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsText(file);
+    });
+  }
+
+  function parseMultipleCSVs(textArray) {
+    let allData = [];
+    for (const text of textArray) {
+      parseCSVAppend(text, allData);
+    }
+    if (!allData.length) return;
+
+    allData.sort((a, b) => a.frame - b.frame);
+    
+    // Deduplicate
+    const seen = new Set();
+    const unique = [];
+    for(const d of allData){
+        if(!seen.has(d.frame)){
+            seen.add(d.frame);
+            unique.push(d);
+        }
+    }
+
+    frames = unique.map(d => d.frame);
+    ranks = unique.map(d => d.rank);
+    longGaps = unique.map(d => d.isGap);
+    
+    drawPlot();
+  }
+
+  function parseCSVAppend(text, allData) {
+    const lines = text.split(/\r?\n/);
+    if (lines.length <= 1) return;
+    const header = lines[0].split(',');
+    const fIdx = header.indexOf('frame');
+    const rIdx = header.indexOf('rank_interpolated');
+    const gIdx = header.indexOf('is_long_gap');
+    
+    if (fIdx === -1 || rIdx === -1) return;
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const cols = line.split(',');
+      const f = parseInt(cols[fIdx], 10);
+      const r = parseFloat(cols[rIdx]);
+      const g = (gIdx !== -1 && cols[gIdx]) ? cols[gIdx].toLowerCase() === 'true' : false;
+
+      if (Number.isFinite(f) && Number.isFinite(r)) {
+        allData.push({ frame: f, rank: r, isGap: g });
+      }
+    }
+  }
+
+  datFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => parseDAT(reader.result);
+      reader.readAsText(file);
+    }
+  });
+
+  function parseDAT(text) {
+    segments = [];
+    const lines = text.split(/\r?\n/);
+    let id = 0;
+    for (const line of lines) {
+      const s = line.trim();
+      if (!s || s.startsWith('#')) continue;
+      
+      let parts = s.includes(',') ? s.split(',') : s.split(/\s+/);
+      
+      parts = parts.filter(p => p.length > 0);
+
+      if (parts.length < 2) continue;
+      
+      const start = parseInt(parts[0], 10);
+      const end = parseInt(parts[1], 10);
+      
+      let label = 'unlabeled';
+      if (parts.length >= 3) label = parts[2];
+
+      let remark = '';
+      if (parts.length >= 4) {
+        remark = parts.slice(3).join(' ');
+      }
+
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        segments.push({ id: id++, startFrame: start, endFrame: end, label: label, remark: remark });
+      }
+    }
+    
+    // Load cache
+    loadState();
+    
+    segCountSpan.textContent = segments.length.toString();
+    if (segments.length > 0) setCurrentSegment(currentSegmentIndex >=0 ? currentSegmentIndex : 0);
+    else setCurrentSegment(-1);
+    
+    updatePlotSegments();
+  }
+
+  // --- 3. Plotting ---
+  function drawPlot() {
+    if (!frames.length) return;
+
+    const smileY = ranks.map((r, i) => longGaps[i] ? null : r);
+    const gapY = ranks.map((r, i) => longGaps[i] ? r : null);
+
+    const trace1 = { x: frames, y: smileY, mode: 'lines', name: 'Rank', line: { color: 'blue', width: 1 } };
+    const trace2 = { x: frames, y: gapY, mode: 'lines', name: 'Gap', line: { color: 'red', dash: 'dash', width: 1 } };
+    
+    // Vertical line
+    const cFrame = frames[0];
+    const trace3 = { x: [cFrame, cFrame], y: [0, 10], mode: 'lines', name: 'Current', line: { dash: 'dot', color: 'black' }, showlegend: false };
+    verticalTraceIndex = 2;
+
+    const layout = {
+      title: false,
+      margin: { t: 10, r: 10, b: 30, l: 40 },
+      xaxis: { title: 'Frame' },
+      yaxis: { 
+        title: 'Rank', 
+        autorange: false, 
+        range: [10.5, -0.5], 
+        fixedrange: true     
+      },
+      showlegend: true,
+      legend: { x: 0, y: 1 }
+    };
+
+    Plotly.newPlot(plotDiv, [trace1, trace2, trace3], layout);
+
+    plotDiv.on('plotly_click', (d) => {
+      if(d && d.points && d.points[0]) {
+        const f = Math.round(d.points[0].x);
+        seekToFrame(f);
+        updatePlotWindow(f);
+      }
+    });
+
+    updatePlotSegments();
+    updatePlotWindow(cFrame);
+  }
+
+  function updateVerticalLine(frame) {
+    if (!frames.length || verticalTraceIndex === null) return;
+    Plotly.restyle(plotDiv, { x: [[frame, frame]] }, [verticalTraceIndex]);
+  }
+
+  function updatePlotWindow(frame) {
+    if (!frames.length) return;
+    const hw = 450;
+    let min = frame - hw;
+    let max = frame + hw;
+    Plotly.relayout(plotDiv, { 'xaxis.range': [min, max] });
+  }
+
+  function labelToColor(label) {
+    switch (label) {
+      case 'true_smile': return 'rgba(0,128,0,0.3)';
+      case 'mixed_smile': return 'rgba(255,215,0,0.4)'; 
+      case 'false_smile': return 'rgba(255,0,0,0.3)';
+      case 'discarded': return 'rgba(128,128,128,0.2)';
+      default: return 'rgba(255,165,0,0.2)';
+    }
+  }
+
+  function updatePlotSegments() {
+    if (!frames.length) return;
+    const shapes = segments.map(seg => ({
+      type: 'rect',
+      xref: 'x', yref: 'paper',
+      x0: seg.startFrame, x1: seg.endFrame,
+      y0: 0, y1: 1,
+      fillcolor: labelToColor(seg.label),
+      line: { width: 0 },
+      layer: 'below'
+    }));
+    Plotly.relayout(plotDiv, { shapes: shapes });
+  }
+
+  // --- 4. Navigation & Logic ---
+  
+  // Quick Set Handlers
+  setStartBtn.addEventListener('click', () => {
+    const cf = timeToFrame(video.currentTime);
+    editStartFrame.value = cf;
+    updateSegFramesBtn.click(); 
+  });
+  
+  setEndBtn.addEventListener('click', () => {
+    const cf = timeToFrame(video.currentTime);
+    editEndFrame.value = cf;
+    updateSegFramesBtn.click();
+  });
+
+  // Create New Segment Handler
+  newSegBtn.addEventListener('click', () => {
+    const cf = timeToFrame(video.currentTime);
+    const newId = segments.length > 0 ? Math.max(...segments.map(s=>s.id)) + 1 : 0;
+    
+    // Create new segment (length 60 frames)
+    const newSeg = {
+        id: newId,
+        startFrame: cf,
+        endFrame: cf + 60,
+        label: 'unlabeled',
+        remark: ''
+    };
+    
+    segments.push(newSeg);
+    
+    segments.sort((a, b) => a.startFrame - b.startFrame);
+    
+    const newIndex = segments.findIndex(s => s.id === newId);
+    
+    setCurrentSegment(newIndex);
+    updatePlotSegments();
+    saveState();
+  });
+
+  // Remark Handler
+  remarkInput.addEventListener('change', () => {
+    if (currentSegmentIndex >= 0 && currentSegmentIndex < segments.length) {
+        segments[currentSegmentIndex].remark = remarkInput.value;
+        saveState();
+    }
+  });
+
+
+  function setCurrentSegment(idx) {
+    currentSegmentIndex = idx;
+    if (idx < 0 || idx >= segments.length) {
+      segIndexSpan.textContent = '-';
+      editStartFrame.value = '';
+      editEndFrame.value = '';
+      segStatusSpan.textContent = '';
+      segStatusSpan.className = 'segment-label';
+      remarkInput.value = '';
+      return;
+    }
+    const seg = segments[idx];
+    segIndexSpan.textContent = (idx + 1).toString();
+    
+    editStartFrame.value = seg.startFrame;
+    editEndFrame.value = seg.endFrame;
+    
+    segStatusSpan.textContent = seg.label;
+    
+    remarkInput.value = seg.remark || ''; 
+
+    // Style status
+    let cls = 'segment-label';
+    if(seg.label === 'true_smile') cls += ' status-labeled';
+    else if(seg.label === 'mixed_smile') cls += ' status-mixed';
+    else if(seg.label === 'false_smile') cls += ' status-labeled'; 
+    else if(seg.label === 'discarded') cls += ' status-discarded';
+    else cls += ' status-unlabeled';
+    segStatusSpan.className = cls;
+
+    // Jump
+    seekToFrame(seg.startFrame);
+    updatePlotWindow(seg.startFrame);
+    saveState();
+  }
+
+  // Button Listeners
+  prevSegBtn.onclick = () => { if(segments.length) setCurrentSegment(Math.max(0, currentSegmentIndex - 1)); };
+  nextSegBtn.onclick = () => { if(segments.length) setCurrentSegment(Math.min(segments.length - 1, currentSegmentIndex + 1)); };
+  
+  nextUnlabeledBtn.onclick = () => {
+    let next = -1;
+    for(let i = currentSegmentIndex + 1; i < segments.length; i++) {
+        if(segments[i].label === 'unlabeled') { next = i; break; }
+    }
+    if (next !== -1) setCurrentSegment(next);
+    else alert('No more unlabeled segments ahead.');
+  };
+
+  function setLabel(lbl) {
+    if (currentSegmentIndex < 0) return;
+    segments[currentSegmentIndex].label = lbl;
+    setCurrentSegment(currentSegmentIndex); 
+    updatePlotSegments(); 
+    saveState();
+  }
+
+  trueSmileBtn.onclick = () => setLabel('true_smile');
+  mixedSmileBtn.onclick = () => setLabel('mixed_smile'); 
+  falseSmileBtn.onclick = () => setLabel('false_smile');
+  discardBtn.onclick = () => setLabel('discarded');
+
+  updateSegFramesBtn.onclick = () => {
+    if (currentSegmentIndex < 0) return;
+    const s = parseInt(editStartFrame.value);
+    const e = parseInt(editEndFrame.value);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || s < 0 || s >= e) {
+      alert('Invalid frame range');
+      return;
+    }
+    segments[currentSegmentIndex].startFrame = s;
+    segments[currentSegmentIndex].endFrame = e;
+    
+    const currentId = segments[currentSegmentIndex].id;
+    segments.sort((a,b) => a.startFrame - b.startFrame);
+    const newIndex = segments.findIndex(seg => seg.id === currentId);
+    
+    setCurrentSegment(newIndex);
+    updatePlotSegments();
+    saveState();
+  };
+
+  // --- 5. Video Control Logic ---
+  video.ontimeupdate = () => {
+    const cf = timeToFrame(video.currentTime);
+    currentFrameSpan.innerText = cf;
+    updateVerticalLine(cf);
+    
+    // Segment Loop Logic
+    if (playingSegment !== null) {
+      const seg = segments.find(s => s.id === playingSegment);
+      if (seg && cf >= seg.endFrame) {
+        video.pause();
+        playingSegment = null;
+        seekToFrame(seg.endFrame);
+      }
+    }
+  };
+
+  function seekToFrame(f) {
+    video.currentTime = Math.max(0, frameToTime(f));
+  }
+
+  prevFrameBtn.onclick = () => seekToFrame(timeToFrame(video.currentTime) - 1);
+  nextFrameBtn.onclick = () => seekToFrame(timeToFrame(video.currentTime) + 1);
+  back6Btn.onclick = () => seekToFrame(timeToFrame(video.currentTime) - 6);
+  forward6Btn.onclick = () => seekToFrame(timeToFrame(video.currentTime) + 6);
+  back1sBtn.onclick = () => { video.currentTime -= 1; };
+  forward1sBtn.onclick = () => { video.currentTime += 1; };
+  
+  playSegmentBtn.onclick = () => {
+    if (currentSegmentIndex < 0) return;
+    const seg = segments[currentSegmentIndex];
+    playingSegment = seg.id;
+    seekToFrame(seg.startFrame);
+    video.play();
+  };
+
+  // --- 6. Export / Cache ---
+  const STATE_KEY = 'smileLabelerSegments_v04';
+  const INDEX_KEY = 'smileLabelerIndex_v04';
+
+  function saveState() {
+    if (segments.length) {
+      localStorage.setItem(STATE_KEY, JSON.stringify(segments));
+      localStorage.setItem(INDEX_KEY, currentSegmentIndex);
+    }
+  }
+
+  function loadState() {
+    const sRaw = localStorage.getItem(STATE_KEY);
+    const iRaw = localStorage.getItem(INDEX_KEY);
+    if (!sRaw) return;
+    
+    try {
+      const cached = JSON.parse(sRaw);
+      if (segments.length > 0 && cached.length > 0) {
+         if (segments[0].startFrame === cached[0].startFrame) {
+             console.log("Restoring cached state...");
+             segments = cached;
+             if (iRaw) currentSegmentIndex = parseInt(iRaw);
+         }
+      }
+    } catch(e) { console.error(e); }
+  }
+
+  clearStateBtn.onclick = () => {
+    if(confirm("Clear cache? This will reset all labels.")) {
+      localStorage.removeItem(STATE_KEY);
+      localStorage.removeItem(INDEX_KEY);
+      location.reload();
+    }
+  };
+
+  exportBtn.onclick = () => {
+    if (!segments.length) return alert('No segments');
+    let out = ['# start_frame end_frame label remark'];
+    for(const s of segments) {
+      if(s.label === 'unlabeled' || s.label === 'discarded') continue;
+      
+      const safeRemark = (s.remark || '').replace(/[\r\n]+/g, ' ');
+      out.push(`${s.startFrame} ${s.endFrame} ${s.label} ${safeRemark}`);
+    }
+    const blob = new Blob([out.join('\n')], {type:'text/plain'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'smile_labels_v04.dat';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+})();
+</script>
+</body>
+</html>
