@@ -1,48 +1,101 @@
-# Smile Rank Analysis Toolkit  
-### 微笑强度分析工具集｜笑顔ランク解析ツールセット
+# SmileRankAnalysis
 
-## 🇨🇳 中文说明
-本项目用于对 **SmileRank（微笑强度曲线）** 数据进行插值、滤波、检测与可视化分析。
-适用于基于帧序列的笑容动态分析研究（例如面部表情实验、情感识别等）。
+SmileRank（微笑强度/笑顔ランク曲线）数据的分析工具集：**插值 → 平滑滤波 → 笑容区间检测 → 可视化对比 → 结果汇总/展示**。适用于基于帧序列的表情动态分析研究（例如 Zoom/实验录像的面部表情时间序列分析）。 :contentReference[oaicite:0]{index=0}
 
-### 文件说明
-| 文件名 | 功能描述 |
-|--------|-----------|
-| run_02_interpolate_and_plot.py | 读取原始 `.dat` 文件，对笑容排名进行插值与分段绘图（每900帧一张图）。 |
-| smile_rank_filter_and_plot.py | 对所有分段CSV进行拼接、滤波与重新绘图，输出平滑后的曲线图与合并CSV。 |
-| smile_rank_filter_compare.py | 对比多种滤波算法（Savitzky-Golay、Gaussian、Moving Average等）的效果。 |
-| detect_and_plot_smile_events.py | 早期笑容检测版本：基于突出度（prominence）与阈值检测笑容段。 |
-| detect_and_plot_smile_events_corelogic.py | 最新稳定版笑容检测逻辑，基于核心阈值（≤3）与局部基线扩展确定笑容起止。输出 `.dat` 文件与绘图。 |
-| pairwise_stitch_plots.py | 将滤波前后对应图像上下拼接对比。 |
-| build_labeled_compare_stacks_0_9.py | 生成0–9段的多算法对比图表，每个算法对应一张标注有算法名称的子图。 |
-| index.html | 可选的可视化入口，用于网页展示结果图。 |
+---
 
-## 🇯🇵 日本語説明
-このプロジェクトは **SmileRank（微笑強度曲線）** データを用いた補間・平滑化・笑顔区間検出・可視化のためのツールセットです。
+## What this repo does
 
-### スクリプト説明
-| ファイル名 | 説明 |
-|-------------|------|
-| run_02_interpolate_and_plot.py | 元データからランクを補間し、900フレームごとに描画。 |
-| smile_rank_filter_and_plot.py | 全CSVを結合し、フィルタリング＋再描画。平滑化後のデータを出力。 |
-| smile_rank_filter_compare.py | 複数の平滑化手法（Savitzky–Golay・Gaussian・移動平均など）の比較。 |
-| detect_and_plot_smile_events.py | 初期の笑顔検出ロジック。ピークとしきい値を用いて笑顔区間を抽出。 |
-| detect_and_plot_smile_events_corelogic.py | 改良版：rank≤3 を核とし、局所ベースラインで笑顔の開始・終了を決定。 |
-| pairwise_stitch_plots.py | 元画像とフィルタ後画像を上下に連結して比較。 |
-| build_labeled_compare_stacks_0_9.py | 0〜9セグメントの各フィルタ結果を縦に並べた比較画像を生成。 |
-| index.html | 結果可視化用の簡易HTML。 |
+Given SmileRank time-series (typically per-frame rank values), this toolkit helps you:
 
-## 🇬🇧 English Description
-A toolkit for analyzing **SmileRank (smile intensity curve)** data — including interpolation, filtering, smile-event detection, and visualization.
+- **Interpolate** raw rank signals and split long sequences into manageable segments (e.g., 900 frames per plot). :contentReference[oaicite:1]{index=1}
+- **Filter / smooth** the curve with multiple methods and export merged CSV + plots. :contentReference[oaicite:2]{index=2}
+- **Compare filters** (Savitzky–Golay / Gaussian / Moving Average, etc.) side-by-side. :contentReference[oaicite:3]{index=3}
+- **Detect smile events** using a stable “core-threshold + local baseline expansion” logic (rank ≤ 3 as core). :contentReference[oaicite:4]{index=4}
+- **Generate visual reports** (stitched before/after plots, stacked comparisons, simple HTML viewer). :contentReference[oaicite:5]{index=5}
 
-### Script Overview
-| File | Description |
-|------|-------------|
-| run_02_interpolate_and_plot.py | Interpolates raw rank data and plots per 900 frames. |
-| smile_rank_filter_and_plot.py | Concatenates all CSV segments, applies filtering, and redraws smooth curves. |
-| smile_rank_filter_compare.py | Compares multiple smoothing filters. |
-| detect_and_plot_smile_events.py | Early smile detection logic. |
-| detect_and_plot_smile_events_corelogic.py | Final version using rank ≤ 3 + local baseline expansion. |
-| pairwise_stitch_plots.py | Stitches original vs filtered plots vertically. |
-| build_labeled_compare_stacks_0_9.py | Generates multi-algorithm comparison charts for segments 0–9. |
-| index.html | Optional viewer for displaying generated plots. |
+---
+
+## Repository structure (high level)
+
+Top-level scripts (main workflow utilities):
+
+- `run_02_interpolate_and_plot.py`  
+  Interpolate raw `.dat` rank data; plot per segment (e.g., 900 frames). :contentReference[oaicite:6]{index=6}
+- `smile_rank_filter_and_plot.py`  
+  Concatenate all segment CSVs → filter/smooth → redraw → export merged CSV + plots. :contentReference[oaicite:7]{index=7}
+- `smile_rank_filter_compare.py`  
+  Compare multiple smoothing filters. :contentReference[oaicite:8]{index=8}
+- `detect_and_plot_smile_events.py`  
+  Early smile-event detection (peak prominence + thresholds). :contentReference[oaicite:9]{index=9}
+- `detect_and_plot_smile_events_corelogic.py`  
+  Stable event detection: **rank ≤ 3** as core; expand with local baseline to determine start/end; outputs `.dat` + plots. :contentReference[oaicite:10]{index=10}
+- `pairwise_stitch_plots.py`  
+  Stitch “before vs after” plots vertically for visual comparison. :contentReference[oaicite:11]{index=11}
+- `build_labeled_compare_stacks_0_9.py`  
+  Build stacked comparison images for segments 0–9 (each filter labeled). :contentReference[oaicite:12]{index=12}
+- `build_filter_selection_gallery.py`  
+  Build a gallery to support filter selection/inspection. :contentReference[oaicite:13]{index=13}
+- `index.html`  
+  Optional lightweight viewer for generated images. :contentReference[oaicite:14]{index=14}
+
+Subfolders (as shown in repo root):
+
+- `AnnotationTools/` :contentReference[oaicite:15]{index=15}
+- `Smile_Detection/` :contentReference[oaicite:16]{index=16}
+- `Tools/` :contentReference[oaicite:17]{index=17}
+- `filter-selection/` :contentReference[oaicite:18]{index=18}
+- `output/` (generated artifacts) :contentReference[oaicite:19]{index=19}
+
+---
+
+## Typical workflow
+
+1. **Prepare input SmileRank data**
+   - Start from your raw SmileRank `.dat` (or exported rank series).
+   - Keep frame index aligned with your video/frame pipeline.
+
+2. **Interpolate + segment plots**
+   - Run `run_02_interpolate_and_plot.py` to interpolate the raw curve and produce per-segment plots. :contentReference[oaicite:20]{index=20}
+
+3. **Filter + export**
+   - Run `smile_rank_filter_and_plot.py` to merge CSV segments, smooth the curve, and output plots + merged CSV. :contentReference[oaicite:21]{index=21}
+
+4. **Compare filters (optional but recommended)**
+   - Run `smile_rank_filter_compare.py` and/or `build_labeled_compare_stacks_0_9.py` to visually decide the best filter. :contentReference[oaicite:22]{index=22}
+
+5. **Detect smile events**
+   - Use `detect_and_plot_smile_events_corelogic.py` as the stable detection pipeline (rank ≤ 3 core + baseline expansion). :contentReference[oaicite:23]{index=23}
+
+6. **Reporting / presentation**
+   - Use `pairwise_stitch_plots.py` for before/after comparisons and `index.html` for quick browsing. :contentReference[oaicite:24]{index=24}
+
+---
+
+## Outputs
+
+Depending on the scripts you run, you will typically get:
+
+- Interpolated and/or filtered **CSV** (merged across segments). :contentReference[oaicite:25]{index=25}
+- Segment-level and summary **plots** (PNG/JPG).
+- Smile-event detection results as **`.dat`** + plots (corelogic script). :contentReference[oaicite:26]{index=26}
+- Stitched/stacked comparison images for quick qualitative evaluation. :contentReference[oaicite:27]{index=27}
+
+---
+
+## Requirements
+
+This repo is primarily Python + a small HTML viewer. The exact dependencies are not listed in the repo root view I can access right now, but based on the functionality, it typically requires:
+
+- Python 3.x
+- Common scientific stack: `numpy`, `pandas`, `matplotlib`
+- Filtering utilities likely using: `scipy` (Savitzky–Golay / Gaussian) :contentReference[oaicite:28]{index=28}
+
+Suggested setup (create your own `requirements.txt` once you confirm imports):
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -U pip
+pip install numpy pandas matplotlib scipy
