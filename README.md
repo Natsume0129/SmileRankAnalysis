@@ -1,9 +1,5 @@
 # SmileRankAnalysis
 
-SmileRank（微笑强度/笑顔ランク曲线）数据的分析工具集：**插值 → 平滑滤波 → 笑容区间检测 → 可视化对比 → 结果汇总/展示**。适用于基于帧序列的表情动态分析研究（例如 Zoom/实验录像的面部表情时间序列分析）。 :contentReference[oaicite:0]{index=0}
-
----
-
 ## What this repo does
 
 Given SmileRank time-series (typically per-frame rank values), this toolkit helps you:
